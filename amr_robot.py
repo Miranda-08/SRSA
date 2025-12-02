@@ -18,7 +18,9 @@ becomes "SHELF-S10").
 (2s), the robot updates its location_id to STATION-P{Byte3} (e.g., if Byte
 3 is 0x01, the location becomes "STATION-P1").
 '''
-
+from influxdb_client_3 import flight_client_options
+import certifi
+from influxdb_client_3 import InfluxDBClient3, Point
 import paho.mqtt.client as mqtt
 import json
 import time
@@ -26,13 +28,43 @@ import random
 import sys
 from datetime import datetime, timezone
 
+
+fh = open(certifi.where(), "r")
+cert = fh.read()
+fh.close()
+
+
 # MQTT Broker Configuration
 BROKER = "10.6.1.9"
 PORT = 1883
 USERNAME = "2023269477" #inventei, n sei se é arbitrário ou não...?
 PASSWORD = "srsa" #eu acho?
 
-received_task_via_MQTT = True 
+
+#INFLUXDB configuration
+token = "tCpqdhmLKj25M0W1Xt9F0_ok-nlk4hHPCPlDG6bjORsUdf23yWrpJgO9AidA6PZZfxn5G1JQ7i6u-b97s89sqQ=="
+org = "SRSA"
+host = "https://us-east-1-1.aws.cloud2.influxdata.com/"
+database = "SRSA_PROJECT"
+write_client = InfluxDBClient3(host=host, token=token, database=database, org=org, flight_client_options=flight_client_options(tls_root_certs=cert))
+
+
+#varbiables and constants
+STATES = [
+        ("MOVING_TO_PICK", 3),
+        ("PICKING", 1),
+        ("MOVING_TO_DROP", 2),
+        ("DROPPING", 1)
+    ]
+global battery, state
+battery = 100
+state = "IDLE"
+
+
+
+
+
+received_task_via_MQTT = False#Mais sentido ser false e mudar on demmand 
 
 def on_connect(client, userdata, flags, rc, properties):
     if rc == 0:
@@ -47,16 +79,6 @@ def on_connect(client, userdata, flags, rc, properties):
 def on_message(client, userdata, msg):
     print(f"[AMR] (ignored) received command topic: {msg.topic}")
     # Parte 1: não fazemos nada aqui.
-
-def battery_decay_charging(state,battery):
-    if state=="CHARGING":
-          battery==100
-          time.sleep(10)
-          return battery
-    else:
-         battery-=1
-         time.sleep(1)
-         return battery
           
 
 def get_location(state):
@@ -71,34 +93,23 @@ def get_location(state):
 
 
 
-def amr_state_machine(robot_id, GROUPID):
-    battery = 100
-    state = "IDLE"
-    battery=battery_decay_charging(state,battery)
-    STATES = [
-        ("MOVING_TO_PICK", 3),
-        ("PICKING", 1),
-        ("MOVING_TO_DROP", 2),
-        ("DROPPING", 1)
-    ]
-
-    print(f"FIRST TURN")
-    while True:
-        time.sleep(4)
+def amr_state_machine(battery,state,STATES):
+        print(f"FIRST TURN")
         print(f"\nNEW TURN")
         # ================= STALLED ==============================
         if state.startswith("MOVING") and random.random(0,1) < 0.05:
             print("[AMR STATUS] Robot {robot_id} was moving but got STALLED for 10s... (coloquei stalled como status temporário APENAS para debug da parte 1; em teoria, stalled continua até que haja um high-priority override command)")
             state = "STALLED"
-            time.sleep(10) #temporario
+            time.sleep(10)
+            battery-=10
+            if battery < 0: battery = 0 #temporario
 
         if state == "STALLED":
-            #TEMPORÁRIO, PARA A PARTE 1
             count -= 1
-            if count == 0:
+            if battery == 100:
                 print(f"[AMR STATUS] Robot {robot_id} FULLY CHARGED. Returned to state IDLE.")
                 state = "IDLE"
-            continue
+            return
 
         # ================= CARREGAMENTO =========================
         if battery <= 0 and state != "CHARGING":
@@ -106,12 +117,10 @@ def amr_state_machine(robot_id, GROUPID):
             state = "CHARGING"
 
         if state == "CHARGING":
-            count -= 1
-            if count == 0:
-                print(f"[AMR STATUS] Robot {robot_id} FULLY CHARGED. Returned to state IDLE.")
-                battery = 100
-                state = "IDLE"
-            continue
+                if battery==100:
+                    print(f"[AMR STATUS] Robot {robot_id} FULLY CHARGED. Returned to state IDLE.")
+                    state = "IDLE"
+                return
 
         # ================= TASK =========================
         if state == "IDLE":
@@ -120,37 +129,52 @@ def amr_state_machine(robot_id, GROUPID):
                 print(f"[AMR STATUS] Robot {robot_id} will start MOVING TO PICK for 3s...")
                 state = "MOVING_TO_PICK"
                 time.sleep(3)
+                battery -= 3
+                if battery < 0: battery = 0
+                return
+            else:
+                 time.sleep(1)
+                 battery-=1
+                 return
 
         if state == "MOVING_TO_PICK":
                 print(f"[AMR STATUS] Robot {robot_id} arrived at picking spot.")
                 print(f"[AMR STATUS] Robot {robot_id} will start PICKING the item for 1s...")
                 state = "PICKING"
                 time.sleep(1)
-                continue
+                battery -= 1
+                if battery < 0: battery = 0
+                return
 
         if state == "PICKING":
                 print(f"[AMR STATUS] Robot {robot_id} picked the item.")
                 print(f"[AMR STATUS] Robot {robot_id} will start MOVING TO DROP for 1s...")
                 state = "MOVING_TO_DROP"
                 time.sleep(2)
-                continue
+                battery -= 2
+                if battery < 0: battery = 0
+                return
 
         if state == "MOVING_TO_DROP":
                 print(f"[AMR STATUS] Robot {robot_id} arrived at dropping spot.")
                 print(f"[AMR STATUS] Robot {robot_id} will start DROPPING for 1s...")
                 state = "DROPPING"
                 time.sleep(1)
-                continue
+
+                battery -= 1
+                if battery < 0: battery = 0
+                return
         
 
         if state == "DROPPING":
                 print(f"[AMR STATUS] Robot {robot_id} dropped the item.")
                 print(f"[AMR STATUS] Robot {robot_id} enter IDLE state again")
                 state = "IDLE"
-                continue
+                return
 
 
-        # ================= JSON =================================
+def publish_info(robot_id,state,battery,GROUPID):
+            # ================= JSON =================================
         payload = {
             "robot_id": robot_id,
             "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
@@ -164,8 +188,11 @@ def amr_state_machine(robot_id, GROUPID):
         client.publish(topic, json.dumps(payload))
         print("[AMR PAYLOAD] PAYLOAD PUBLISHED:", payload)
 
+        #================= INFLUXDB ================================
 
-        # ================= ESTADOS ================================   
+        p = Point("Data").tag("Robots", f"amr_robot{robot_id}").field("status",payload["status"] ).field("location", payload["location_id"]).field("battery",payload['battery']).time(payload["timestamp"])
+        write_client.write(p)
+        print(f"Values inserted")
 
 
 # ========= MAIN =========
@@ -185,4 +212,7 @@ if __name__ == "__main__":
     client.loop_start()
 
     while True:
-        amr_state_machine(robot_id, GROUPID)
+        amr_state_machine()
+        publish_info(robot_id,state,battery,GROUPID)
+        time.sleep(1)
+
