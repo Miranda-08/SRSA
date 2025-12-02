@@ -12,6 +12,7 @@ the new structure, it should subscribe to warehouse/{GroupID}/# and
 
 import paho.mqtt.client as mqtt
 import json
+import datetime
 
 # MQTT Broker Configuration
 BROKER = "10.6.1.9"
@@ -22,29 +23,33 @@ GROUPID = "2023269477"
 QOS_LEVEL = 1
 
 # Topic: ouve TUDO do grupo
-TOPIC = f"warehouse/{GROUPID}/#"
+TOPICS = [f"warehouse/{GROUPID}/#","{GROUPID}/internal/#"]
 
 
 def on_connect(client, userdata, flags, rc, properties):
     if rc == 0:
         print("[DEBUGGER] Connected to MQTT broker")
-        client.subscribe(TOPIC, QOS_LEVEL)
-        print(f"[DEBUGGER] Subscribed to: {TOPIC}")
+        for TOPIC in TOPICS:
+            client.subscribe(TOPIC, QOS_LEVEL)
+            print(f"[DEBUGGER] Subscribed to: {TOPIC}")
     else:
         print(f"[DEBUGGER] Connection failed with code {rc}")
 
 
 def on_message(client, userdata, msg):
-    print("\n============== NEW MQTT MESSAGE ==============")
-    print(f"Topic: {msg.topic}")
+    print("=================NEW MESSAGE====================")
+    time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    payload_text = msg.payload.decode(errors="replace")
 
+    # if payload is JSON, print compact single-line JSON, otherwise raw string
     try:
-        payload = json.loads(msg.payload.decode())
-        print("Payload:", json.dumps(payload, indent=4))
+        parsed = json.loads(payload_text)
+        message_text = json.dumps(parsed, separators=(",", ":"))
     except json.JSONDecodeError:
-        print("Raw payload:", msg.payload.decode())
+        message_text = payload_text
 
-    print("==============================================\n")
+    print(f"[time]: {time_str}")
+    print(f"[{msg.topic}]:{message_text}")
 
 
 def run_debugger():
