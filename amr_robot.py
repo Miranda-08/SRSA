@@ -75,13 +75,18 @@ def amr_state_machine(robot_id, GROUPID):
         ("DROPPING", 1)
     ]
 
+    print(f"FIRST TURN")
     while True:
+        time.sleep(4)
+        print(f"\nNEW TURN")
         # ================= STALLED ==============================
         if state.startswith("MOVING") and random.random() < 0.05:
+            print("[AMR STATUS] was moving but got STALLED")
             state = "STALLED"
 
         # ================= CARREGAMENTO =========================
         if battery <= 0 and state != "CHARGING":
+            print("[AMR STATUS] will start charging now")
             state = "CHARGING"
 
         # ================= JSON =================================
@@ -96,25 +101,25 @@ def amr_state_machine(robot_id, GROUPID):
         # ================= TOPIC PUBLISH =========================
         topic = f"warehouse/{GROUPID}/amr/{robot_id}/status"
         client.publish(topic, json.dumps(payload))
-        print("[AMR STATUS]", payload)
+        print("[AMR PAYLOAD] PAYLOAD PUBLISHED:", payload)
 
 
         # ================= ESTADOS ================================
         if state == "CHARGING":
-            print(f"[AMR] {robot_id} charging...")
+            print(f"[AMR STATUS] Robot {robot_id} charging for 10s...")
             time.sleep(10)
             battery = 100
             state = "IDLE"
             continue    
 
         elif state == "STALLED":
-            print(f"[AMR] {robot_id} STALLED. Waiting for 10s (TEMPORARY: Part 1) [/ Waiting for a high-priority override command (SUPPOSED TO BE LIKE THAT: Part 2)]")
+            print(f"[AMR STATUS] Robot {robot_id} STALLED for 10s (coloquei stalled como status temporário APENAS para debug da parte 1; em teoria, stalled continua até que haja um high-priority override command)")
             # POR ENQUANTO, PARTE 1:
             time.sleep(10)
-            print(f"[AMR] (DEBUG) {robot_id} not STALLED anymore by God's mercy")
+            print(f"[AMR STATUS] Robot {robot_id} not STALLED pela misericórdia de Deus")
             continue
 
-            # PARTE 2: [n completo]
+            # PARTE 2: [não completo]
             #while True:
                 #time.sleep(1)
                 #client.publish(topic, json.dumps(payload))
@@ -122,14 +127,14 @@ def amr_state_machine(robot_id, GROUPID):
 
         elif state == "IDLE":
             if received_task_via_MQTT: #por enquanto simulamos recebimento de uma task acho eu
-                print(f"[AMR] {robot_id} received a FAKE (part 1) task")
+                print(f"[AMR STATUS] Robot {robot_id} received a FAKE (part 1) task")
                 state = "MOVING_TO_PICK"
                 continue
 
         elif state != "IDLE":
             battery -= 1
 
-        else:
+        elif state in [s[0] for s in STATES]:
             for st, duration in STATES:
                 if state == st:
                     time.sleep(duration)
@@ -139,6 +144,10 @@ def amr_state_machine(robot_id, GROUPID):
                     else:
                         state = "IDLE"
                     break
+            battery -= 1
+        
+        else:
+            battery -= 1
 
 
 # ========= MAIN =========
