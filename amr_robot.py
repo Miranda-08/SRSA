@@ -32,7 +32,6 @@ PORT = 1883
 USERNAME = "2023269477" #inventei, n sei se é arbitrário ou não...?
 PASSWORD = "srsa" #eu acho?
 
-# Not used in Part 1, but kept to match your structure
 received_task_via_MQTT = True 
 
 def on_connect(client, userdata, flags, rc, properties):
@@ -49,6 +48,17 @@ def on_message(client, userdata, msg):
     print(f"[AMR] (ignored) received command topic: {msg.topic}")
     # Parte 1: não fazemos nada aqui.
 
+def battery_decay_charging(state,battery):
+    if state=="CHARGING":
+          battery==100
+          time.sleep(10)
+          return battery
+    else:
+         battery-=1
+         time.sleep(1)
+         return battery
+          
+
 def get_location(state):
     if state == "IDLE":                 return "DOCK"
     elif state.startswith("MOVING"):    return "TRANSIT"
@@ -64,7 +74,7 @@ def get_location(state):
 def amr_state_machine(robot_id, GROUPID):
     battery = 100
     state = "IDLE"
-
+    battery=battery_decay_charging(state,battery)
     STATES = [
         ("MOVING_TO_PICK", 3),
         ("PICKING", 1),
@@ -77,10 +87,10 @@ def amr_state_machine(robot_id, GROUPID):
         time.sleep(4)
         print(f"\nNEW TURN")
         # ================= STALLED ==============================
-        if state.startswith("MOVING") and random.random() < 0.05:
+        if state.startswith("MOVING") and random.random(0,1) < 0.05:
             print("[AMR STATUS] Robot {robot_id} was moving but got STALLED for 10s... (coloquei stalled como status temporário APENAS para debug da parte 1; em teoria, stalled continua até que haja um high-priority override command)")
             state = "STALLED"
-            count = 10 #TEMPORÁRIO, PARA A PARTE 1
+            time.sleep(10) #temporario
 
         if state == "STALLED":
             #TEMPORÁRIO, PARA A PARTE 1
@@ -94,7 +104,6 @@ def amr_state_machine(robot_id, GROUPID):
         if battery <= 0 and state != "CHARGING":
             print(f"[AMR STATUS] Robot {robot_id} is out of battery and will recharge for 10s...")
             state = "CHARGING"
-            count = 10
 
         if state == "CHARGING":
             count -= 1
@@ -110,39 +119,31 @@ def amr_state_machine(robot_id, GROUPID):
                 print(f"[AMR STATUS] Robot {robot_id} received a FAKE (part 1) task.")
                 print(f"[AMR STATUS] Robot {robot_id} will start MOVING TO PICK for 3s...")
                 state = "MOVING_TO_PICK"
-                count = 3
+                time.sleep(3)
 
         if state == "MOVING_TO_PICK":
-            count -= 1
-            if count == 0:
                 print(f"[AMR STATUS] Robot {robot_id} arrived at picking spot.")
                 print(f"[AMR STATUS] Robot {robot_id} will start PICKING the item for 1s...")
                 state = "PICKING"
-                count = 1
+                time.sleep(1)
                 continue
 
         if state == "PICKING":
-            count -=1
-            if count == 0:
                 print(f"[AMR STATUS] Robot {robot_id} picked the item.")
                 print(f"[AMR STATUS] Robot {robot_id} will start MOVING TO DROP for 1s...")
                 state = "MOVING_TO_DROP"
-                count = 2
+                time.sleep(2)
                 continue
 
         if state == "MOVING_TO_DROP":
-            count -=1
-            if count == 0:
                 print(f"[AMR STATUS] Robot {robot_id} arrived at dropping spot.")
                 print(f"[AMR STATUS] Robot {robot_id} will start DROPPING for 1s...")
                 state = "DROPPING"
-                count = 1
+                time.sleep(1)
                 continue
         
 
         if state == "DROPPING":
-            count -= 1
-            if count == 0:
                 print(f"[AMR STATUS] Robot {robot_id} dropped the item.")
                 print(f"[AMR STATUS] Robot {robot_id} enter IDLE state again")
                 state = "IDLE"
@@ -183,4 +184,5 @@ if __name__ == "__main__":
     client.connect(BROKER, PORT)
     client.loop_start()
 
-    amr_state_machine(robot_id, GROUPID)
+    while True:
+        amr_state_machine(robot_id, GROUPID)
