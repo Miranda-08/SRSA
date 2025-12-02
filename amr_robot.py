@@ -3,10 +3,7 @@
 # Estilo baseado em publisher01.py | MQTT paho-mqtt 2.1.0
 
 
-
-
 # CORRIGIR SHELF-SX
-
 '''
 Command Processing & Logic: The script must use the struct library to decode
 the 3-byte binary payload received on the command topic (see "Warehouse
@@ -36,7 +33,7 @@ USERNAME = "2023269477" #inventei, n sei se é arbitrário ou não...?
 PASSWORD = "srsa" #eu acho?
 
 # Not used in Part 1, but kept to match your structure
-received_task_via_MQTT = True  
+received_task_via_MQTT = True 
 
 def on_connect(client, userdata, flags, rc, properties):
     if rc == 0:
@@ -81,13 +78,76 @@ def amr_state_machine(robot_id, GROUPID):
         print(f"\nNEW TURN")
         # ================= STALLED ==============================
         if state.startswith("MOVING") and random.random() < 0.05:
-            print("[AMR STATUS] was moving but got STALLED")
+            print("[AMR STATUS] Robot {robot_id} was moving but got STALLED for 10s... (coloquei stalled como status temporário APENAS para debug da parte 1; em teoria, stalled continua até que haja um high-priority override command)")
             state = "STALLED"
+            count = 10 #TEMPORÁRIO, PARA A PARTE 1
+
+        if state == "STALLED":
+            #TEMPORÁRIO, PARA A PARTE 1
+            count -= 1
+            if count == 0:
+                print(f"[AMR STATUS] Robot {robot_id} FULLY CHARGED. Returned to state IDLE.")
+                state = "IDLE"
+            continue
 
         # ================= CARREGAMENTO =========================
         if battery <= 0 and state != "CHARGING":
-            print("[AMR STATUS] will start charging now")
+            print(f"[AMR STATUS] Robot {robot_id} is out of battery and will recharge for 10s...")
             state = "CHARGING"
+            count = 10
+
+        if state == "CHARGING":
+            count -= 1
+            if count == 0:
+                print(f"[AMR STATUS] Robot {robot_id} FULLY CHARGED. Returned to state IDLE.")
+                battery = 100
+                state = "IDLE"
+            continue
+
+        # ================= TASK =========================
+        if state == "IDLE":
+            if received_task_via_MQTT: #por enquanto simulamos recebimento de uma task acho eu
+                print(f"[AMR STATUS] Robot {robot_id} received a FAKE (part 1) task.")
+                print(f"[AMR STATUS] Robot {robot_id} will start MOVING TO PICK for 3s...")
+                state = "MOVING_TO_PICK"
+                count = 3
+
+        if state == "MOVING_TO_PICK":
+            count -= 1
+            if count == 0:
+                print(f"[AMR STATUS] Robot {robot_id} arrived at picking spot.")
+                print(f"[AMR STATUS] Robot {robot_id} will start PICKING the item for 1s...")
+                state = "PICKING"
+                count = 1
+                continue
+
+        if state == "PICKING":
+            count -=1
+            if count == 0:
+                print(f"[AMR STATUS] Robot {robot_id} picked the item.")
+                print(f"[AMR STATUS] Robot {robot_id} will start MOVING TO DROP for 1s...")
+                state = "MOVING_TO_DROP"
+                count = 2
+                continue
+
+        if state == "MOVING_TO_DROP":
+            count -=1
+            if count == 0:
+                print(f"[AMR STATUS] Robot {robot_id} arrived at dropping spot.")
+                print(f"[AMR STATUS] Robot {robot_id} will start DROPPING for 1s...")
+                state = "DROPPING"
+                count = 1
+                continue
+        
+
+        if state == "DROPPING":
+            count -= 1
+            if count == 0:
+                print(f"[AMR STATUS] Robot {robot_id} dropped the item.")
+                print(f"[AMR STATUS] Robot {robot_id} enter IDLE state again")
+                state = "IDLE"
+                continue
+
 
         # ================= JSON =================================
         payload = {
@@ -104,50 +164,7 @@ def amr_state_machine(robot_id, GROUPID):
         print("[AMR PAYLOAD] PAYLOAD PUBLISHED:", payload)
 
 
-        # ================= ESTADOS ================================
-        if state == "CHARGING":
-            print(f"[AMR STATUS] Robot {robot_id} charging for 10s...")
-            time.sleep(10)
-            battery = 100
-            state = "IDLE"
-            continue    
-
-        elif state == "STALLED":
-            print(f"[AMR STATUS] Robot {robot_id} STALLED for 10s (coloquei stalled como status temporário APENAS para debug da parte 1; em teoria, stalled continua até que haja um high-priority override command)")
-            # POR ENQUANTO, PARTE 1:
-            time.sleep(10)
-            print(f"[AMR STATUS] Robot {robot_id} not STALLED pela misericórdia de Deus")
-            continue
-
-            # PARTE 2: [não completo]
-            #while True:
-                #time.sleep(1)
-                #client.publish(topic, json.dumps(payload))
-            #continue?
-
-        elif state == "IDLE":
-            if received_task_via_MQTT: #por enquanto simulamos recebimento de uma task acho eu
-                print(f"[AMR STATUS] Robot {robot_id} received a FAKE (part 1) task")
-                state = "MOVING_TO_PICK"
-                continue
-
-        elif state != "IDLE":
-            battery -= 1
-
-        elif state in [s[0] for s in STATES]:
-            for st, duration in STATES:
-                if state == st:
-                    time.sleep(duration)
-                    current_index = STATES.index((st, duration))
-                    if current_index < len(STATES) - 1:
-                        state = STATES[current_index + 1][0]
-                    else:
-                        state = "IDLE"
-                    break
-            battery -= 1
-        
-        else:
-            battery -= 1
+        # ================= ESTADOS ================================   
 
 
 # ========= MAIN =========
@@ -163,7 +180,7 @@ if __name__ == "__main__":
     client.username_pw_set(USERNAME, PASSWORD)
     client.on_connect = on_connect
 
-    client.connect(BROKER, PORT, 60)
+    client.connect(BROKER, PORT)
     client.loop_start()
 
     amr_state_machine(robot_id, GROUPID)
