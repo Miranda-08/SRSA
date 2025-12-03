@@ -114,6 +114,14 @@ def publish_info(robot_id, GROUPID, state, battery, Sx, Px):
 DEBUG = True # <----------------------------------------------------------------------------------------------------------- DEBUG
 
 def amr_state_machine(robot_id, GROUPID):
+    # COISAS POR FAZER:
+    #   - task só é considerado completada (removida de commands) SE E SÓ SE o robô de facto a completar com sucesso (pode acontecer stalled, no battery, forced command, etc)
+    #   - se for interrompido por alguma razão... o que acontece ao que estava a fazer? se, por exemplo, estava a carregar um item, esse item fica perdido? continua a ser
+    #segurado pelo robo?
+    #   - tasks FORCED (cmd_type=3) terem prioridade sobre as outras: o robô larga "repentinamente" tudo o que está a fazer?
+    #   - robô deve mover-se até à estação de carga? quanto tempo demoraria? existe limitação no nº de robôs a serem charged?
+    #   - bateria neste momento, enquanto charging, é constante. é suposto ir variando até aos 100% em 10 turnos (segundos)?
+
     global state, battery, commands, Sx, Px, remaining_time, next_tick, interval
 
     time.sleep(1) # Tempo para deixar MQTT conectar antes do loop
@@ -121,6 +129,11 @@ def amr_state_machine(robot_id, GROUPID):
     if DEBUG:
         print("*"*10 + "[DEBUG] Modo de debug ativo — inicializando comando fake" + "*"*10)
         commands.append((1, 2, 5)) # cmd_type=1, shelf 2, station 5
+        commands.append((1, 1, 4))
+        commands.append((1, 3, 3))
+        commands.append((1, 2, 2))
+        commands.append((1, 1, 1))
+        commands.append((1, 2, 5))
     # ===============================
 
     print(f"\n\nSTART\n")
