@@ -16,9 +16,6 @@ fh = open(certifi.where(), "r")
 cert = fh.read()
 fh.close()
 
-interval = 1.0
-next_tick = time.monotonic()
-
 # ********************************************* CONFIG CONEXÕES *********************************************
 # ^ MQTT Broker Configuration
 BROKER = "10.6.1.9"
@@ -128,6 +125,9 @@ def amr_state_machine(robot_id, GROUPID):
 
     print(f"\n\nSTART\n")
     publish_info(robot_id, GROUPID, state, battery, Sx, Px)
+
+    interval = 1.0
+    next_tick = time.monotonic()
     while True:
         print(f"\n\nNEW TURN\n")
 
@@ -137,7 +137,6 @@ def amr_state_machine(robot_id, GROUPID):
             #(stalled como status temporário APENAS para debug da parte 1; em teoria, stalled continua até que haja um high-priority override command)
             state = "STALLED"
             remaining_time = 10
-
         if state == "STALLED":
             #TEMPORÁRIO, PARA A PARTE 1: sai sozinho ao fim de 10s
             if remaining_time == 0:
@@ -154,7 +153,6 @@ def amr_state_machine(robot_id, GROUPID):
             print(f"[AMR STATUS] Robot {robot_id} is almost out of battery and will recharge for 10s...")
             state = "CHARGING"
             remaining_time = 10
-
         if state == "CHARGING":
             remaining_time -= 1
             if remaining_time == 0:
