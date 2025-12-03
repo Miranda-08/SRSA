@@ -113,7 +113,7 @@ def publish_info(robot_id, GROUPID, state, battery, Sx, Px):
 # ********************************************* CÓDIGO PRINCIPAL *********************************************
 DEBUG = True # <----------------------------------------------------------------------------------------------------------- DEBUG
 
-def amr_state_machine(robot_id, GROUPID):
+def amr_loop(robot_id, GROUPID):
     # COISAS POR FAZER:
     #   - task só é considerado completada (removida de commands) SE E SÓ SE o robô de facto a completar com sucesso (pode acontecer stalled, no battery, forced command, etc)
     #   - se for interrompido por alguma razão... o que acontece ao que estava a fazer? se, por exemplo, estava a carregar um item, esse item fica perdido? continua a ser
@@ -136,13 +136,13 @@ def amr_state_machine(robot_id, GROUPID):
         commands.append((1, 2, 5))
     # ===============================
 
-    print(f"\n\nSTART\n")
+    print(f"\n\n[ROBOT INIT]\n")
     publish_info(robot_id, GROUPID, state, battery, Sx, Px)
 
     interval = 1.0
     next_tick = time.monotonic()
     while True:
-        print(f"\n\nNEW TURN\n")
+        print(f"\n\n[AMR] NEW TURN\n")
 
         # ================= STALLED ==============================
         if state.startswith("MOVING") and random.random() < 0.05:
@@ -251,7 +251,7 @@ def amr_state_machine(robot_id, GROUPID):
 # ********************************************* MAIN *********************************************
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print("Usage: python3 amr_robot.py <GroupID> <RobotID>")
+        print("Usage: python amr_robot.py <GroupID> <RobotID>")
         sys.exit(1)
 
     GROUPID = sys.argv[1]
@@ -264,4 +264,4 @@ if __name__ == "__main__":
     client.connect(BROKER, PORT)
     client.loop_start()
 
-    amr_state_machine(robot_id, GROUPID)
+    amr_loop(robot_id, GROUPID)

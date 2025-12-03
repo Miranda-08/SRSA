@@ -6,10 +6,6 @@ the new structure, it should subscribe to warehouse/{GroupID}/# and
 [topic]:[message].
 '''
 
-#!/usr/bin/env python3
-# MQTT Debugger – Parte 1
-# Estilo baseado em subscriber01.py das práticas
-
 import paho.mqtt.client as mqtt
 import json
 import datetime
@@ -17,14 +13,10 @@ import datetime
 # MQTT Broker Configuration
 BROKER = "10.6.1.9"
 PORT = 1883
-USERNAME = "2023269477"       # igual aos outros scripts
-PASSWORD = "srsa"
 GROUPID = "2023269477"
 QOS_LEVEL = 1
 
-# Topic: ouve TUDO do grupo
 TOPICS = [f"warehouse/{GROUPID}/#","{GROUPID}/internal/#"]
-
 
 def on_connect(client, userdata, flags, rc, properties):
     if rc == 0:
@@ -40,7 +32,6 @@ def on_message(client, userdata, msg):
     print("=================NEW MESSAGE====================")
     time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     payload_text = msg.payload.decode(errors="replace")
-
     # if payload is JSON, print compact single-line JSON, otherwise raw string
     try:
         parsed = json.loads(payload_text)
@@ -54,7 +45,6 @@ def on_message(client, userdata, msg):
 
 def run_debugger():
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
-    client.username_pw_set(USERNAME, PASSWORD)
 
     client.on_connect = on_connect
     client.on_message = on_message
