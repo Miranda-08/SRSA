@@ -8,7 +8,7 @@ the new structure, it should subscribe to warehouse/{GroupID}/# and
 
 import paho.mqtt.client as mqtt
 import json
-import datetime
+from datetime import datetime
 
 # MQTT Broker Configuration
 BROKER = "10.6.1.9"
