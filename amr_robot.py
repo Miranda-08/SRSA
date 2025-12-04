@@ -10,6 +10,7 @@ state = "IDLE"
 commands = [] #comandos por executar
 Sx = None #current shelf
 Px = None #current packing station
+current_task = None
 remaining_time = 0 #segundos que faltam no estado atual
 
 fh = open(certifi.where(), "r")
@@ -24,7 +25,7 @@ PORT = 1883
 # ^ INFLUXDB configuration
 token = "tCpqdhmLKj25M0W1Xt9F0_ok-nlk4hHPCPlDG6bjORsUdf23yWrpJgO9AidA6PZZfxn5G1JQ7i6u-b97s89sqQ=="
 org = "SRSA"
-host = "https://us-east-1-1.aws.cloud2.influxdata.com/"
+host = "https://us-east-1-1.aws.cloud2.influxdata.com/" #mudar de US para UE
 database = "SRSA_PROJECT"
 write_client = InfluxDBClient3(host=host, token=token, database=database, org=org, flight_client_options=flight_client_options(tls_root_certs=cert))
 
@@ -42,7 +43,7 @@ def on_connect(client, userdata, flags, rc, properties):
 def on_message(client, userdata, msg):
     global commands
     if msg.topic.endswith("/command"):
-        cmd_type, shelf_id, station_id = struct.unpack("BBB", msg.payload) # => unpack já os torna inteiros
+        cmd_type, shelf_id, station_id = struct.unpack("BBB", msg.payload) # => struct.unpack já os torna inteiros
         commands.append((cmd_type, shelf_id, station_id))
         print("[AMR] Received command:", cmd_type, shelf_id, station_id)
 
@@ -74,7 +75,7 @@ def tick_sleep():
     if sleep_time > 0:
         time.sleep(sleep_time)
 
-def get_location(state, shelf_id, station_id):
+def get_location(state, shelf_id, station_id, charging_id = None):
     if state == "IDLE":                 return "DOCK"
     elif state.startswith("MOVING"):    return "TRANSIT"
     elif state == "PICKING":            return f"SHELF-S{shelf_id}" if shelf_id is not None else "SHELF"
@@ -83,6 +84,17 @@ def get_location(state, shelf_id, station_id):
     elif state == "STALLED":            return "TRANSIT"
 
     else:                               return "UNKNOWN"
+
+def back_to_previous_task(current_task):
+    if current_task and current_task[1] is not None:
+        print(f"Returned to state MOVING TO PICK.")
+        return ("MOVING_TO_PICK", 4)
+    elif current_task and current_task[2] is not None:
+        print(f"Returned to state MOVING TO DROP.")
+        return ("MOVING_TO_DROP", 2)
+    else:
+        print(f"Returned to state IDLE.")
+        return "IDLE"
 
 def publish_info(robot_id, GROUPID, state, battery, Sx, Px):
         # ================= JSON =================================
@@ -121,8 +133,9 @@ def amr_loop(robot_id, GROUPID):
     #   - tasks FORCED (cmd_type=3) terem prioridade sobre as outras: o robô larga "repentinamente" tudo o que está a fazer?
     #   - robô deve mover-se até à estação de carga? quanto tempo demoraria? existe limitação no nº de robôs a serem charged?
     #   - bateria neste momento, enquanto charging, é constante. é suposto ir variando até aos 100% em 10 turnos (segundos)?
+    #   - se tentar pegar em x items da shelf sendo que x>items disponiveis na shelf (NOTA: 2 ROBOS PODEM TENTAR TIRAR AO MESMO TEMPO) deve esperar até que items fique disponível
 
-    global state, battery, commands, Sx, Px, remaining_time, next_tick, interval
+    global state, battery, commands, Sx, Px, remaining_time, next_tick, interval, current_task
 
     time.sleep(1) # Tempo para deixar MQTT conectar antes do loop
     # ========= DEBUG MODE ==========
@@ -153,8 +166,8 @@ def amr_loop(robot_id, GROUPID):
         if state == "STALLED":
             #TEMPORÁRIO, PARA A PARTE 1: sai sozinho ao fim de 10s
             if remaining_time == 0:
-                print(f"[AMR STATUS] Robot {robot_id} saiu do estado STALLED por um milagre de Deus (TEMP - Part 1). Retorna para estado IDLE")
-                state = "IDLE"
+                print(f"[AMR STATUS] Robot {robot_id} saiu do estado STALLED.")
+                state, remaining_time = back_to_previous_task(current_task)
             else:
                 remaining_time -= 1
             publish_info(robot_id, GROUPID, state, battery, Sx, Px)
@@ -162,26 +175,45 @@ def amr_loop(robot_id, GROUPID):
             continue
 
         # ================= CARREGAMENTO =========================
-        if battery <= 15 and state != "CHARGING":
-            print(f"[AMR STATUS] Robot {robot_id} is almost out of battery and will recharge for 10s...")
-            state = "CHARGING"
-            remaining_time = 10
-        if state == "CHARGING":
-            remaining_time -= 1
+        if battery <= 20 and state not in ("MOVING_TO_CHARGE", "CHARGING"):
+            print(f"[AMR STATUS] Robot {robot_id} is almost out of battery. Will start MOVING TO CHARGE for 3s...")
+            state = "MOVING_TO_CHARGE"
+            remaining_time = 3
+        
+        if state == "MOVING_TO_CHARGE":
+            battery = max(0, battery-1)
             if remaining_time == 0:
-                print(f"[AMR STATUS] Robot {robot_id} FULLY CHARGED. Returned to state IDLE.")
+                print(f"[AMR STATUS] Robot {robot_id} arrived at at charging station. Starting to charge for 10s...")
+                state = "CHARGING"
+                remaining_time = 10
+            else:
+                remaining_time = max(0, remaining_time-1)
+            publish_info(robot_id, GROUPID, state, battery, Sx, Px)
+            tick_sleep()
+            continue
+
+        if state == "CHARGING":
+            if remaining_time == 0:
+                print(f"[AMR STATUS] Robot {robot_id} is FULLY CHARGED.")
                 battery = 100
-                state = "IDLE"
+                state, remaining_time = back_to_previous_task(current_task)
+            else:
+                missing_battery = 100 - battery
+                charge_per_sec = missing_battery / remaining_time
+                battery += charge_per_sec
+                battery = int(min(100, battery))
+                remaining_time = max(0, remaining_time-1)
             publish_info(robot_id, GROUPID, state, battery, Sx, Px)
             tick_sleep()
             continue
 
         # ================= TASK =========================
         if state == "IDLE":
-            if commands:
-                cmd_type, Sx, Px = commands.pop(0)
+            if current_task is None and commands: #or current_task is not None and commands[0][0] == "3":
+                current_task = list(commands[0])
+                cmd_type, Sx, Px = current_task
                     #cmd_type 1 = EXECUTE_TASK, 3 = FORCE_CHARGE
-                print(f"[AMR STATUS] Robot {robot_id} received a [FAKE - part 1] task: TYPE {cmd_type}, SHELF {Sx}, STATION {Px}")
+                print(f"[AMR STATUS] Robot {robot_id} received a task: TYPE {cmd_type}, SHELF {Sx} -> STATION {Px}")
                 print(f"[AMR STATUS] Robot {robot_id} will start MOVING TO PICK for 3s... => shelf {Sx}")
                 state = "MOVING_TO_PICK"
                 remaining_time = 3
@@ -208,6 +240,7 @@ def amr_loop(robot_id, GROUPID):
             battery = max(0, battery-1)
             if remaining_time == 0:
                 print(f"[AMR STATUS] Robot {robot_id} picked the item.")
+                current_task[1] = None
                 print(f"[AMR STATUS] Robot {robot_id} will start MOVING TO DROP for 2s... => packing station {Px}")
                 state = "MOVING_TO_DROP"
                 remaining_time = 2
@@ -236,7 +269,10 @@ def amr_loop(robot_id, GROUPID):
             battery = max(0, battery-1)
             if remaining_time == 0:
                 print(f"[AMR STATUS] Robot {robot_id} dropped the item at station P{Px}.")
-                print(f"[AMR STATUS] Robot {robot_id} entering IDLE state again")
+                current_task[2] = None
+                print(f"[AMR STATUS] Robot {robot_id} completed the task! Entering IDLE state again")
+                commands.pop(0)
+                current_task = None
                 state = "IDLE"
             else:
                 remaining_time = max(0, remaining_time-1)
