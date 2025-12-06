@@ -10,14 +10,18 @@ import paho.mqtt.client as mqtt
 import json
 from datetime import datetime
 
-# MQTT Broker Configuration
+# ********************************************* CONFIG CONEXÕES *********************************************
+# ^ MQTT Broker Configuration
 BROKER = "10.6.1.9"
 PORT = 1883
 GROUPID = "2023269477"
 QOS_LEVEL = 1
 
-TOPICS = [f"warehouse/{GROUPID}/#","{GROUPID}/internal/#"]
+# ^ TOPICS Configuration
+TOPICS = [f"warehouse/{GROUPID}/#","{GROUPID}/internal/#"] #subscribe
 
+
+# ********************************************* FUNÇÕES CALLBACK *********************************************
 def on_connect(client, userdata, flags, rc, properties):
     if rc == 0:
         print("[DEBUGGER] Connected to MQTT broker")
@@ -43,6 +47,7 @@ def on_message(client, userdata, msg):
     print(f"[{msg.topic}]:{message_text}")
 
 
+# ********************************************* CÓDIGO PRINCIPAL *********************************************
 def run_debugger():
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
 
@@ -58,5 +63,6 @@ def run_debugger():
         print("[DEBUGGER] Exiting.")
 
 
+# ========= MAIN =========
 if __name__ == "__main__":
     run_debugger()

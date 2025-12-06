@@ -8,10 +8,6 @@ from influxdb_client_3 import flight_client_options
 refill_timer = 0
 refilling = False
 
-fh = open(certifi.where(), "r")
-cert = fh.read()
-fh.close()
-
 
 # ********************************************* CONFIG CONEXÕES *********************************************
 # ^ MQTT Broker Configuration
@@ -19,6 +15,9 @@ BROKER = "10.6.1.9"
 PORT = 1883
 
 # ^ INFLUXDB Configuration
+fh = open(certifi.where(), "r")
+cert = fh.read()
+fh.close()
 token = "tCpqdhmLKj25M0W1Xt9F0_ok-nlk4hHPCPlDG6bjORsUdf23yWrpJgO9AidA6PZZfxn5G1JQ7i6u-b97s89sqQ=="
 org = "SRSA"
 host = "https://us-east-1-1.aws.cloud2.influxdata.com/"
@@ -105,12 +104,12 @@ def shelf_loop(GROUPID, zone_id, asset_id, update_time):
         print(f"\n\n[SHELVES] NEW TURN\n")
 
         # POR ENQUANTO, PARA DEBUG: A CADA 3 TURNOS DECREMENTA 1 UNIDADE AO STOCK, by Chat GPT
-        turn_counter += 1
-        if turn_counter >= 3:
-            turn_counter = 0
-            if stock > 0:
-                stock -= 1
-                print(f"[SHELF {asset_id}] Stock decrementado automaticamente → {stock}")
+        # turn_counter += 1
+        # if turn_counter >= 3:
+        #     turn_counter = 0
+        #     if stock > 0:
+        #         stock -= 1
+        #         print(f"[SHELF {asset_id}] Stock decrementado automaticamente → {stock}")
         #
 
         if stock == 0 and refilling == False:

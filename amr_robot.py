@@ -11,6 +11,7 @@ commands = [] #comandos por executar
 Sx = None #current shelf
 Px = None #current packing station
 current_task = None
+forced_task = None
 remaining_time = 0 #segundos que faltam no estado atual
 
 fh = open(certifi.where(), "r")
@@ -23,6 +24,9 @@ BROKER = "10.6.1.9"
 PORT = 1883
 
 # ^ INFLUXDB configuration
+fh = open(certifi.where(), "r")
+cert = fh.read()
+fh.close()
 token = "tCpqdhmLKj25M0W1Xt9F0_ok-nlk4hHPCPlDG6bjORsUdf23yWrpJgO9AidA6PZZfxn5G1JQ7i6u-b97s89sqQ=="
 org = "SRSA"
 host = "https://us-east-1-1.aws.cloud2.influxdata.com/" #mudar de US para UE
@@ -127,15 +131,10 @@ DEBUG = True # <----------------------------------------------------------------
 
 def amr_loop(robot_id, GROUPID):
     # COISAS POR FAZER:
-    #   - task só é considerado completada (removida de commands) SE E SÓ SE o robô de facto a completar com sucesso (pode acontecer stalled, no battery, forced command, etc)
-    #   - se for interrompido por alguma razão... o que acontece ao que estava a fazer? se, por exemplo, estava a carregar um item, esse item fica perdido? continua a ser
-    #segurado pelo robo?
-    #   - tasks FORCED (cmd_type=3) terem prioridade sobre as outras: o robô larga "repentinamente" tudo o que está a fazer?
-    #   - robô deve mover-se até à estação de carga? quanto tempo demoraria? existe limitação no nº de robôs a serem charged?
-    #   - bateria neste momento, enquanto charging, é constante. é suposto ir variando até aos 100% em 10 turnos (segundos)?
+    #   - existem charging stations limitadas? quantas? existe limitação no nº de robôs a serem charged?
     #   - se tentar pegar em x items da shelf sendo que x>items disponiveis na shelf (NOTA: 2 ROBOS PODEM TENTAR TIRAR AO MESMO TEMPO) deve esperar até que items fique disponível
 
-    global state, battery, commands, Sx, Px, remaining_time, next_tick, interval, current_task
+    global state, battery, commands, Sx, Px, remaining_time, next_tick, interval, current_task, forced_task, forced_task_index
 
     time.sleep(1) # Tempo para deixar MQTT conectar antes do loop
     # ========= DEBUG MODE ==========
@@ -157,14 +156,28 @@ def amr_loop(robot_id, GROUPID):
     while True:
         print(f"\n\n[AMR] NEW TURN\n")
 
+        # ================= high-priority override command =======
+        if forced_task is None:
+            forced_task_index = next((i for i, cmd in enumerate(commands) if cmd[0] == 3), None)
+            if forced_task_index is not None: # se receber comando high-priority (e n tiver a executar um outro comando high-priority)
+                forced_task = list(commands[forced_task_index])
+                #forced_type, forced_Sx, forced_Px = forced_task
+                print(f"[AMR STATUS] Robot {robot_id} received a FORCED task: FORCE_CHARGE. Beginning MOVING TO CHARGE")
+                state = "MOVING_TO_CHARGE_FORCED"
+                remaining_time = 3
+                publish_info(robot_id, GROUPID, state, battery, Sx, Px)
+                tick_sleep()
+                continue
+
+
         # ================= STALLED ==============================
         if state.startswith("MOVING") and random.random() < 0.05:
             print(f"[AMR STATUS] Robot {robot_id} was moving but got STALLED for 10s...")
             #(stalled como status temporário APENAS para debug da parte 1; em teoria, stalled continua até que haja um high-priority override command)
             state = "STALLED"
-            remaining_time = 10
+            remaining_time = 20
         if state == "STALLED":
-            #TEMPORÁRIO, PARA A PARTE 1: sai sozinho ao fim de 10s
+            #TEMPORÁRIO, PARA A PARTE 1: sai sozinho ao fim de 20s
             if remaining_time == 0:
                 print(f"[AMR STATUS] Robot {robot_id} saiu do estado STALLED.")
                 state, remaining_time = back_to_previous_task(current_task)
@@ -175,12 +188,12 @@ def amr_loop(robot_id, GROUPID):
             continue
 
         # ================= CARREGAMENTO =========================
-        if battery <= 20 and state not in ("MOVING_TO_CHARGE", "CHARGING"):
+        if battery <= 20 and state not in ("MOVING_TO_CHARGE", "MOVING_TO_CHARGE_FORCED", "CHARGING"):
             print(f"[AMR STATUS] Robot {robot_id} is almost out of battery. Will start MOVING TO CHARGE for 3s...")
             state = "MOVING_TO_CHARGE"
             remaining_time = 3
         
-        if state == "MOVING_TO_CHARGE":
+        if state in ("MOVING_TO_CHARGE", "MOVING_TO_CHARGE_FORCED"):
             battery = max(0, battery-1)
             if remaining_time == 0:
                 print(f"[AMR STATUS] Robot {robot_id} arrived at at charging station. Starting to charge for 10s...")
@@ -197,6 +210,10 @@ def amr_loop(robot_id, GROUPID):
                 print(f"[AMR STATUS] Robot {robot_id} is FULLY CHARGED.")
                 battery = 100
                 state, remaining_time = back_to_previous_task(current_task)
+                if forced_task:
+                    commands.pop(forced_task_index)
+                    forced_task = None
+                    forced_task_index = None
             else:
                 missing_battery = 100 - battery
                 charge_per_sec = missing_battery / remaining_time
@@ -209,10 +226,9 @@ def amr_loop(robot_id, GROUPID):
 
         # ================= TASK =========================
         if state == "IDLE":
-            if current_task is None and commands: #or current_task is not None and commands[0][0] == "3":
+            if current_task is None and commands: 
                 current_task = list(commands[0])
-                cmd_type, Sx, Px = current_task
-                    #cmd_type 1 = EXECUTE_TASK, 3 = FORCE_CHARGE
+                cmd_type, Sx, Px = current_task #cmd_type 1 = EXECUTE_TASK, 3 = FORCE_CHARGE
                 print(f"[AMR STATUS] Robot {robot_id} received a task: TYPE {cmd_type}, SHELF {Sx} -> STATION {Px}")
                 print(f"[AMR STATUS] Robot {robot_id} will start MOVING TO PICK for 3s... => shelf {Sx}")
                 state = "MOVING_TO_PICK"
