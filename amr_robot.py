@@ -114,16 +114,17 @@ def publish_info(robot_id, GROUPID, state, battery, Sx, Px):
         client.publish(topic, json.dumps(payload))
         print("\n[AMR PAYLOAD] PAYLOAD PUBLISHED:", payload)
         #================= INFLUXDB ================================
-        p = (
-            Point("Data")
-            .tag("Robots", f"amr_robot{robot_id}")
-            .field("status",payload["status"] )
-            .field("location", payload["location_id"])
-            .field("battery",payload['battery'])
-            .time(payload["timestamp"])
-        )
-        write_client.write(p)
-        print(f"[INFLUX DB] Values inserted to InfluxDB: {p}")
+        #isto é o warehouse_gateway.py que faz
+        # p = (
+        #     Point("Data")
+        #     .tag("Robots", f"amr_robot{robot_id}")
+        #     .field("status",payload["status"] )
+        #     .field("location", payload["location_id"])
+        #     .field("battery",payload['battery'])
+        #     .time(payload["timestamp"])
+        # )
+        # write_client.write(p)
+        # print(f"[INFLUX DB] Values inserted to InfluxDB: {p}")
 
 
 # ********************************************* CÓDIGO PRINCIPAL *********************************************
@@ -171,18 +172,12 @@ def amr_loop(robot_id, GROUPID):
 
 
         # ================= STALLED ==============================
-        if state.startswith("MOVING") and random.random() < 0.05:
-            print(f"[AMR STATUS] Robot {robot_id} was moving but got STALLED for 10s...")
-            #(stalled como status temporário APENAS para debug da parte 1; em teoria, stalled continua até que haja um high-priority override command)
-            state = "STALLED"
-            remaining_time = 20
+        # if state.startswith("MOVING") and random.random() < 0.05:
+        #     print(f"[AMR STATUS] Robot {robot_id} was moving but got STALLED for 10s...")
+        #     #(stalled como status temporário APENAS para debug da parte 1; em teoria, stalled continua até que haja um high-priority override command)
+        #     state = "STALLED"
+
         if state == "STALLED":
-            #TEMPORÁRIO, PARA A PARTE 1: sai sozinho ao fim de 20s
-            if remaining_time == 0:
-                print(f"[AMR STATUS] Robot {robot_id} saiu do estado STALLED.")
-                state, remaining_time = back_to_previous_task(current_task)
-            else:
-                remaining_time -= 1
             publish_info(robot_id, GROUPID, state, battery, Sx, Px)
             tick_sleep()
             continue

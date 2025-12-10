@@ -7,6 +7,8 @@ from influxdb_client_3 import flight_client_options
 # ********************************************* INICIALIZAÇÕES *********************************************
 refill_timer = 0
 refilling = False
+stock = 0
+GROUPID = 2023269477
 
 
 # ********************************************* CONFIG CONEXÕES *********************************************
@@ -24,15 +26,34 @@ host = "https://us-east-1-1.aws.cloud2.influxdata.com/"
 database = "SRSA_PROJECT"
 write_client = InfluxDBClient3(host=host, token=token, database=database, org=org, flight_client_options=flight_client_options(tls_root_certs=cert))
 
+TOPIC_STOCK = f"{GROUPID}/internal/stock/update"
+
 
 # ********************************************* FUNÇÕES CALLBACK *********************************************
 def on_connect(client, userdata, flags, rc, properties):
     if rc == 0:
         print("[SHELF] Connected to MQTT broker")
+        client.subscribe(TOPIC_STOCK, 1)
+        print(f"[SHELF] Subscribed to topic: stock {TOPIC_STOCK}")
     else:
         print("[SHELF] Connection failed:", rc)
 
+def on_message(client, userdata, msg):
+    global stock, refilling, refill_timer
+    
+    if msg.topic.endswith("/stock/update"):
+        data = json.loads(msg.payload)
+        if data["asset_id"] == asset_id:
+            quantity = int(data.get("quantity", 0))
+            if stock >= quantity:
+                stock -= quantity
+                print(f"[SHELF {asset_id}] Stock updated → {stock}")
+            else:
+                refilling = True
+                refill_timer = 2
+                print(f"[SHELF {asset_id}] Not enough stock! Starting refill for 2 seconds...")
 
+            
 # ********************************************* FUNÇÕES AUXILIARES *********************************************
 def tick_sleep():
     """
@@ -72,45 +93,59 @@ def publish_info(asset_id, GROUPID, zone_id, item_id, stock, units):
 
 # ********************************************* CÓDIGO PRINCIPAL *********************************************
 def shelf_loop(GROUPID, zone_id, asset_id, update_time):
-    # COISAS POR FAZER:
-    #   - decremento REAL do shelf quando o AMR faz PICK
+    #   - falta alternar o estado realisticamente
 
     global refill_timer, refilling, stock, interval, next_tick
     time.sleep(1) # Tempo para deixar MQTT conectar antes do loop
+    interval = update_time
 
-    # ===================== CONFIGURAÇÃO POR ZONA =====================
+    # ===================== PACK STATION =====================
+    if zone_id == "packing_zone":
+        print(f"\n\n[PACK STATION INIT]\n")
+        status = "AVAILABLE"
+        next_tick = time.monotonic()
+
+        while True:
+            print(f"\n\n[PACK STATION] NEW TURN\n")
+
+            # Alterna estado
+            
+            # ================= JSON ===============================
+            payload = {
+                "asset_id": asset_id,
+                "type": "PACK_STATION",
+                "status": status
+            }
+
+            # ================= MQTT PUBLISH =======================
+            topic = f"warehouse/{GROUPID}/locations/{zone_id}/{asset_id}/status"
+            client.publish(topic, json.dumps(payload))
+            print("[PACK STATION STATUS]", payload)
+
+            tick_sleep()
+    
+    # ===================== SHELF =====================
     # storage-a → S1–S5 → units ||||| storage-b → S6–S10 → kg
-    # Identificar shelf number a partir de do asset_id e inicializar
+
     shelf_num = int(asset_id[1:])  # Sx → x; shelf_num = x 
     if 1 <= shelf_num <= 5:
-        item_id = f"item_{chr(64 + shelf_num)}" # Se shelf_num = 1: 64 + 1 = 65; char(65) = 'A' || Se shelf_num = 2: 64 + 2 = 66; char(66) = 'B' || ... até num = 5 ou seja 'E'
-        units = "units" # 1 'units' = 23kg
-        stock_init = randint(3, 10) #arbitrario
+        item_id = f"item_{chr(64 + shelf_num)}"
+        units = "units"
+        stock_init = randint(3, 10)
     else:
-        item_id = f"item_{chr(64 + shelf_num)}" # igual, para shelf_num > 5
+        item_id = f"item_{chr(64 + shelf_num)}"
         units = "kg"
-        stock_init = randint(5, 40) #arbitrario
+        stock_init = randint(5, 40)
+
     stock = stock_init
-    
 
     print(f"\n\n[SHELF INIT]\n")
     publish_info(asset_id, GROUPID, zone_id, item_id, stock, units)
 
-    interval = update_time
     next_tick = time.monotonic()
 
-    turn_counter = 0 # por enquanto, by Chat GPT
     while True:
         print(f"\n\n[SHELVES] NEW TURN\n")
-
-        # POR ENQUANTO, PARA DEBUG: A CADA 3 TURNOS DECREMENTA 1 UNIDADE AO STOCK, by Chat GPT
-        # turn_counter += 1
-        # if turn_counter >= 3:
-        #     turn_counter = 0
-        #     if stock > 0:
-        #         stock -= 1
-        #         print(f"[SHELF {asset_id}] Stock decrementado automaticamente → {stock}")
-        #
 
         if stock == 0 and refilling == False:
             print(f"[SHELF {asset_id}] Stock vazio! Vai iniciar refill automático, durante 2 segundos...")
@@ -137,8 +172,10 @@ def shelf_loop(GROUPID, zone_id, asset_id, update_time):
 if __name__ == "__main__":
     if len(sys.argv) != 5:
         print("Usage: python3 shelves.py <GroupID> <zone_id> <asset_id> <update_time>")
+        print("zone_id = A ou B ou packing_zone")
         print("Se <zone_id> = A: <asset_id> = S1, S2, S3, S4 ou S5")
         print("Se <zone_id> = B: <asset_id> = S6, S7, S8, S9 ou S10")
+        print("Se <zone_id> = packing_zone: <asset_id> = P1, P2 ou P3")
         sys.exit(1)
 
     GROUPID = sys.argv[1]
@@ -152,13 +189,17 @@ if __name__ == "__main__":
     elif zone_id == "B" and asset_id not in ('S6','S7','S8','S9','S10'):
         print("ERRO: Para zone_id = B só é possível ter asset_id = S6, S7, S8, S9 ou S10")
         sys.exit(1)
-    elif zone_id not in ('A', 'B'):
-        print("ERRO: Só é possível colocar zone_id = A ou zone_id = B")
+    elif zone_id == "packing_zone" and asset_id not in ('P1', 'P2', 'P3'):
+        print("ERRO: Para zone_id = packing_zone só é possível ter asset_id = P1, P2 ou P3")
+        sys.exit(1)
+    elif zone_id not in ('A', 'B', "packing_zone"):
+        print("ERRO: Só é possível colocar zone_id = A ou zone_id = B ou zone_id = packing_zone")
         sys.exit(1)
 
 
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
+    client.on_message = on_message
 
     client.connect(BROKER, PORT, 60)
     client.loop_start()
