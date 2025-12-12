@@ -1,6 +1,7 @@
 import paho.mqtt.client as mqtt, json, time, socket, struct, threading, certifi
 from influxdb_client_3 import InfluxDBClient3, Point
 from influxdb_client_3 import flight_client_options
+import struct
 
 #A) Recebe dados de robots e sensores
 #B) Armazena e republica dados normalizados
@@ -207,6 +208,7 @@ def udp_server():
                 .field("override", "FORCE_CHARGE")
             )
             write_client.write(p)
+
 
 
 # ========= MAIN =========
