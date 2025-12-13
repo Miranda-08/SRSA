@@ -23,15 +23,6 @@ fh.close()
 BROKER = "10.6.1.9"
 PORT = 1883
 
-# ^ INFLUXDB configuration
-fh = open(certifi.where(), "r")
-cert = fh.read()
-fh.close()
-token = "tCpqdhmLKj25M0W1Xt9F0_ok-nlk4hHPCPlDG6bjORsUdf23yWrpJgO9AidA6PZZfxn5G1JQ7i6u-b97s89sqQ=="
-org = "SRSA"
-host = "https://us-east-1-1.aws.cloud2.influxdata.com/" #mudar de US para UE
-database = "SRSA_PROJECT"
-write_client = InfluxDBClient3(host=host, token=token, database=database, org=org, flight_client_options=flight_client_options(tls_root_certs=cert))
 
 
 # ********************************************* FUNÇÕES CALLBACK *********************************************
@@ -113,18 +104,7 @@ def publish_info(robot_id, GROUPID, state, battery, Sx, Px):
         topic = f"warehouse/{GROUPID}/amr/{robot_id}/status"
         client.publish(topic, json.dumps(payload))
         print("\n[AMR PAYLOAD] PAYLOAD PUBLISHED:", payload)
-        #================= INFLUXDB ================================
-        #isto é o warehouse_gateway.py que faz
-        # p = (
-        #     Point("Data")
-        #     .tag("Robots", f"amr_robot{robot_id}")
-        #     .field("status",payload["status"] )
-        #     .field("location", payload["location_id"])
-        #     .field("battery",payload['battery'])
-        #     .time(payload["timestamp"])
-        # )
-        # write_client.write(p)
-        # print(f"[INFLUX DB] Values inserted to InfluxDB: {p}")
+
 
 
 # ********************************************* CÓDIGO PRINCIPAL *********************************************
@@ -139,7 +119,7 @@ def amr_loop(robot_id, GROUPID):
 
     time.sleep(1) # Tempo para deixar MQTT conectar antes do loop
     # ========= DEBUG MODE ==========
-    if DEBUG:
+    """ if DEBUG:
         print("*"*10 + "[DEBUG] Modo de debug ativo — inicializando comando fake" + "*"*10)
         commands.append((1, 2, 5)) # cmd_type=1, shelf 2, station 5
         commands.append((1, 1, 4))
@@ -147,6 +127,7 @@ def amr_loop(robot_id, GROUPID):
         commands.append((1, 2, 2))
         commands.append((1, 1, 1))
         commands.append((1, 2, 5))
+    """
     # ===============================
 
     print(f"\n\n[ROBOT INIT]\n")

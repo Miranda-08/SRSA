@@ -38,30 +38,47 @@ def on_connect(client, userdata, flags, rc, properties):
 
 def udp_server():
     """UDP Server that listens for new order connections on port 9091"""
-    print(f"[COORDINATOR] UDP Server listening on port {UDP_PORT}")
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(("0.0.0.0", UDP_PORT))
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind(("0.0.0.0", UDP_PORT))
+        print(f"[COORDINATOR] UDP Server listening on port {UDP_PORT}")
+        print(f"[COORDINATOR] UDP Server bound to 0.0.0.0:{UDP_PORT}")
+    except Exception as e:
+        print(f"[COORDINATOR] ERROR: Failed to bind UDP server: {e}")
+        return
     
     while True:
-        data, addr = sock.recvfrom(1024)
-        
         try:
-            order = json.loads(data.decode())
-            # Order format: {"item": "item_A", "quantity": 10, "pack_station": "P1"}
-            pending_orders.append(order)
-            print(f"[COORDINATOR] UDP ALERT: New order received from {addr}: {order}")
+            data, addr = sock.recvfrom(1024)
+            print(f"[COORDINATOR] UDP data received from {addr}: {data}")
             
-            # Try to assign tasks when new order arrives
-            assign_tasks()
-        except json.JSONDecodeError:
-            print(f"[COORDINATOR] Invalid JSON in UDP message: {data}")
+            try:
+                order = json.loads(data.decode())
+                # Order format: {"item": "item_A", "quantity": 10, "pack_station": "P1"}
+                pending_orders.append(order)
+                print(f"[COORDINATOR]  UDP ALERT: New order received from {addr}: {order}")
+                print(f"[COORDINATOR] Pending orders queue: {len(pending_orders)} order(s)")
+                
+                # Try to assign tasks when new order arrives
+                assign_tasks()
+            except json.JSONDecodeError as e:
+                print(f"[COORDINATOR]  Invalid JSON in UDP message: {data}")
+                print(f"[COORDINATOR] Error: {e}")
+            except Exception as e:
+                print(f"[COORDINATOR]  Error processing UDP order: {e}")
+
         except Exception as e:
-            print(f"[COORDINATOR] Error processing UDP order: {e}")
+            print(f"[COORDINATOR]  Error in UDP server loop: {e}")
+
 
 
 def on_message(client, userdata, msg):
-    """Process incoming MQTT messages and update world_state"""
+    """
+    Process incoming MQTT messages and update world_state.
+    All world state information comes from MQTT messages published by the Gateway:
+    - Robot status from {GROUPID}/internal/amr/{robot_id}/status
+    - Shelf and packing station status from {GROUPID}/internal/static/{asset_id}/status
+    """
     topic = msg.topic
     payload = msg.payload.decode(errors="replace")
     
@@ -171,21 +188,73 @@ def assign_tasks():
             print(f"[COORDINATOR] No shelf found with item '{required_item}' and stock >= {required_quantity}")
             continue
 
-        # STEP 2: Find available (IDLE) robot
+        # STEP 2: Find available (IDLE) robot - try in order (AMR-1, AMR-2, AMR-3, ...)
         target_robot = None
+        
+        # Get all robots and sort by robot ID to ensure consistent ordering
+        available_robots = []
         for robot_id, robot_data in world_state["robots"].items():
             if robot_data.get("status") == "IDLE":
-                target_robot = robot_id
-                break
-
-        if target_robot is None:
+                available_robots.append(robot_id)
+        
+        # Sort robots by ID (AMR-1, AMR-2, AMR-3, etc.) - extract number for sorting
+        # Create list of tuples (robot_number, robot_id) for sorting
+        robots_with_numbers = []
+        for robot_id in available_robots:
+            if "-" in robot_id:
+                try:
+                    robot_number = int(robot_id.split("-")[1])
+                except:
+                    robot_number = 999
+            else:
+                robot_number = 999
+            robots_with_numbers.append((robot_number, robot_id))
+        
+        # Sort by robot number
+        robots_with_numbers.sort()
+        
+        # Extract sorted robot IDs
+        sorted_robots = [robot_id for _, robot_id in robots_with_numbers]
+        
+        if sorted_robots:
+            target_robot = sorted_robots[0]  # Use first available robot in order
+            print(f"[COORDINATOR] Selected robot {target_robot} (available robots: {sorted_robots})")
+        else:
             print("[COORDINATOR] No IDLE robot available")
             continue
 
-        # STEP 3: Verify packing station is available
-        station_status = world_state["packing_stations"].get(pack_station)
-        if station_status != "AVAILABLE":
-            print(f"[COORDINATOR] Packing station {pack_station} is not AVAILABLE (status: {station_status})")
+        # STEP 3: Find available packing station - try specified one first, then in order (P1, P2, P3, ...)
+        target_station = None
+        
+        # Get all available packing stations
+        available_stations = []
+        for station_id, station_status in world_state["packing_stations"].items():
+            if station_status == "AVAILABLE":
+                available_stations.append(station_id)
+        
+        # If the specified packing station is available, use it
+        if pack_station in available_stations:
+            target_station = pack_station
+        elif available_stations:
+            # Sort packing stations by ID (P1, P2, P3, etc.) - extract number for sorting
+            stations_with_numbers = []
+            for station_id in available_stations:
+                # Extract number from station ID (e.g., "P1" -> 1)
+                try:
+                    station_number = int(station_id[1:])  # Skip first character (P) and get number
+                except:
+                    station_number = 999
+                stations_with_numbers.append((station_number, station_id))
+            
+            # Sort by station number
+            stations_with_numbers.sort()
+            
+            # Extract sorted station IDs
+            sorted_stations = [station_id for _, station_id in stations_with_numbers]
+            target_station = sorted_stations[0]  # Use first available station in order
+            print(f"[COORDINATOR] Specified station {pack_station} not available, using {target_station} (available: {sorted_stations})")
+        else:
+            print(f"[COORDINATOR] No packing station available (specified: {pack_station}) waiting for one to become available")
             continue
 
         # STEP 4: All conditions met - send dispatch task
@@ -193,7 +262,7 @@ def assign_tasks():
             "robot_id": target_robot,
             "command": "EXECUTE_TASK",
             "target_shelf_id": target_shelf,
-            "target_station_id": pack_station
+            "target_station_id": target_station
         }
 
         topic_dispatch = f"{GROUPID}/internal/tasks/dispatch"
@@ -201,7 +270,7 @@ def assign_tasks():
 
 
         # STEP 5: Mark packing station as BUSY
-        world_state["packing_stations"][pack_station] = "BUSY"
+        world_state["packing_stations"][target_station] = "BUSY"
 
         # STEP 6: Remove order from pending list
         pending_orders.pop(i)
@@ -229,11 +298,16 @@ if __name__ == "__main__":
     client.connect(BROKER, PORT)
     client.loop_start()
 
+    # Start UDP server in a separate thread (blocking operation)
     udp_thread = threading.Thread(target=udp_server, daemon=True)
     udp_thread.start()
+    
+    # Give UDP server a moment to start
+    time.sleep(0.5)
 
     print("[COORDINATOR] Fleet Coordinator running...")
-    print("[COORDINATOR] - Listening to MQTT ")
-    print("[COORDINATOR] - Listening to UDP port 9091 ")
+    print("[COORDINATOR] - Listening to MQTT for world state updates")
+    print("[COORDINATOR] - Listening to UDP port 9091 for new orders")
+    print("[COORDINATOR] - Processing pending orders and dispatching tasks")
     while True:
         time.sleep(1)

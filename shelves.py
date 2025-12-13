@@ -9,6 +9,9 @@ refill_timer = 0
 refilling = False
 stock = 0
 GROUPID = 2023269477
+status = "AVAILABLE"  # For packing stations
+asset_id = None  # Will be set in main
+zone_id = None  # Will be set in main
 
 
 # ********************************************* CONFIG CONEXÕES *********************************************
@@ -31,15 +34,22 @@ TOPIC_STOCK = f"{GROUPID}/internal/stock/update"
 
 # ********************************************* FUNÇÕES CALLBACK *********************************************
 def on_connect(client, userdata, flags, rc, properties):
+    global asset_id, zone_id, GROUPID
     if rc == 0:
         print("[SHELF] Connected to MQTT broker")
         client.subscribe(TOPIC_STOCK, 1)
         print(f"[SHELF] Subscribed to topic: stock {TOPIC_STOCK}")
+        
+        # If this is a packing station, also subscribe to robot status updates
+        if zone_id == "packing_zone":
+            robot_status_topic = f"{GROUPID}/internal/amr/+/status"
+            client.subscribe(robot_status_topic, 1)
+            print(f"[PACK STATION {asset_id}] Subscribed to robot status: {robot_status_topic}")
     else:
         print("[SHELF] Connection failed:", rc)
 
 def on_message(client, userdata, msg):
-    global stock, refilling, refill_timer
+    global stock, refilling, refill_timer, asset_id, zone_id, status
     
     if msg.topic.endswith("/stock/update"):
         data = json.loads(msg.payload)
@@ -52,6 +62,31 @@ def on_message(client, userdata, msg):
                 refilling = True
                 refill_timer = 2
                 print(f"[SHELF {asset_id}] Not enough stock! Starting refill for 2 seconds...")
+    
+    # Handle robot status updates for packing stations
+    elif zone_id == "packing_zone" and "/internal/amr/" in msg.topic:
+        try:
+            data = json.loads(msg.payload)
+            robot_status = data.get("status", "")
+            robot_location = data.get("location_id", "")
+
+            if robot_location.startswith("STATION-"):
+                station_id = robot_location.split("-")[1]  # Extract "P1", "P2", etc.
+                if station_id == asset_id:
+                    # Robot is at this station
+                    if robot_status == "DROPPING" :
+                        # Robot is dropping - mark as BUSY
+                        if status != "BUSY":
+                            status = "BUSY"
+                            print(f"[PACK STATION {asset_id}] Status changed to BUSY (robot dropping)")
+            elif status == "BUSY":
+                        status = "AVAILABLE"
+                        print(f"[PACK STATION {asset_id}] Status changed to AVAILABLE (robot finished dropping, status: {robot_status})")
+
+
+                
+        except Exception as e:
+            print(f"[PACK STATION {asset_id}] Error processing robot status: {e}")
 
             
 # ********************************************* FUNÇÕES AUXILIARES *********************************************
@@ -79,16 +114,7 @@ def publish_info(asset_id, GROUPID, zone_id, item_id, stock, units):
         topic = f"warehouse/{GROUPID}/locations/{zone_id}/{asset_id}/status"
         client.publish(topic, json.dumps(payload))
         print("[SHELF STATUS]", payload)
-        #=================== INFLUXDB ============================
-        p = (
-            Point("Data")
-            .tag("Shelves", f"{asset_id}")
-            .field("item_id",payload["item_id"] )
-            .field("stock", payload["stock"])
-            .field("units",payload['unit'])
-        )
-        write_client.write(p)
-        print(f"Values inserted into InfluxDB: {p}")
+
 
 
 # ********************************************* CÓDIGO PRINCIPAL *********************************************
@@ -101,6 +127,9 @@ def shelf_loop(GROUPID, zone_id, asset_id, update_time):
 
     # ===================== PACK STATION =====================
     if zone_id == "packing_zone":
+        global status
+        client.on_message = on_message
+
         print(f"\n\n[PACK STATION INIT]\n")
         status = "AVAILABLE"
         next_tick = time.monotonic()
@@ -108,7 +137,7 @@ def shelf_loop(GROUPID, zone_id, asset_id, update_time):
         while True:
             print(f"\n\n[PACK STATION] NEW TURN\n")
 
-            # Alterna estado
+            # Status is updated automatically when robots drop items (via MQTT callback)
             
             # ================= JSON ===============================
             payload = {
@@ -178,6 +207,7 @@ if __name__ == "__main__":
         print("Se <zone_id> = packing_zone: <asset_id> = P1, P2 ou P3")
         sys.exit(1)
 
+
     GROUPID = sys.argv[1]
     zone_id = sys.argv[2]
     asset_id = sys.argv[3]
@@ -200,7 +230,6 @@ if __name__ == "__main__":
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
     client.on_message = on_message
-
     client.connect(BROKER, PORT, 60)
     client.loop_start()
 

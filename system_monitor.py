@@ -1,6 +1,5 @@
 import paho.mqtt.client as mqtt
 import json
-import sys
 import time
 import socket
 from collections import defaultdict
@@ -27,12 +26,6 @@ robot_last_alert_time = {}  # {robot_id: timestamp} - to avoid spam
 
 # ********************************************* HEALTH ASSESSMENT *********************************************
 def assess_robot_health(robot_id, current_data):
-    """
-    Assess robot health and return health level: "NORMAL" or "CRITICAL"
-    Detects:
-    1. STALLED: Robot status is MOVING but location hasn't changed for 30 seconds
-    2. LOW_BATTERY: Battery < 15% and robot is not CHARGING or MOVING_TO_CHARGE
-    """
     current_time = time.time()
     current_location = current_data.get("location_id", "")
     current_status = current_data.get("status", "")
@@ -57,13 +50,13 @@ def assess_robot_health(robot_id, current_data):
             # Check if all recent locations are the same
             locations = [loc for _, loc, _, _ in recent_history]
             if len(set(locations)) == 1 and locations[0] == current_location:
-                print(f"[MONITOR] ⚠️  STALLED detected: {robot_id} has been MOVING at {current_location} for {STALLED_TIME_THRESHOLD}s")
+                print(f"[MONITOR]   STALLED detected: {robot_id} has been MOVING at {current_location} for {STALLED_TIME_THRESHOLD}s")
                 return "CRITICAL", "STALLED"
     
     # Check for LOW_BATTERY condition
     if current_battery < LOW_BATTERY_THRESHOLD:
         if current_status not in ("CHARGING", "MOVING_TO_CHARGE", "MOVING_TO_CHARGE_FORCED"):
-            print(f"[MONITOR] ⚠️  LOW_BATTERY detected: {robot_id} has {current_battery}% battery and status is {current_status}")
+            print(f"[MONITOR]   LOW_BATTERY detected: {robot_id} has {current_battery}% battery and status is {current_status}")
             return "CRITICAL", "LOW_BATTERY"
     
     # Robot is healthy
@@ -155,11 +148,11 @@ def on_message(client, userdata, msg):
     if health_level == "CRITICAL":
         if previous_health != "CRITICAL" or reason:  # New CRITICAL or reason provided
             send_alert(robot_id, health_level, reason)
-            print(f"[MONITOR] 📊 {robot_id} health: {health_level} ({reason})")
+            print(f"[MONITOR]  {robot_id} health: {health_level} ({reason})")
     else:
         if previous_health == "CRITICAL":
-            print(f"[MONITOR] ✅ {robot_id} health recovered: {health_level}")
-        print(f"[MONITOR] 📊 {robot_id} health: {health_level}")
+            print(f"[MONITOR]  {robot_id} health recovered: {health_level}")
+        print(f"[MONITOR] {robot_id} health: {health_level}")
 
 
 # ********************************************* MAIN *********************************************
