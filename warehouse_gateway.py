@@ -28,6 +28,7 @@ import struct
 # ********************************************* INICIALIZAÇÕES *********************************************
 UNIT_KG_FACTOR = 23 # 1 unit = 23 kg
 
+
 # ********************************************* CONFIG CONEXÕES *********************************************
 # ^ MQTT Broker Configuration
 BROKER = "10.6.1.9"
@@ -51,8 +52,6 @@ UDP_PORT = 9090
 # ^ TOPICS Configuration
 TOPIC_ALL_RAW = f"warehouse/{GROUPID}/#"
 TOPIC_DISPATCH = f"{GROUPID}/internal/tasks/dispatch"
-
-
 
 # ********************************************* FUNÇÕES CALLBACK *********************************************
 def on_connect(client, userdata, flags, rc, properties):
@@ -90,7 +89,11 @@ def on_message(client, userdata, msg):
             stock = data.get("stock")
             unit = data.get("unit")
             # all SHELVES to "units"; 1 unit = 23 kg
-                
+            if unit == "kg":
+                if isinstance(stock, (int, float)):
+                    stock_units = int(stock / UNIT_KG_FACTOR)
+                    data["stock"] = stock_units
+                    data["unit"] = "units"
             asset_id = data["asset_id"]
             internal_topic = f"{GROUPID}/internal/static/{asset_id}/status"
 
@@ -125,7 +128,7 @@ def on_message(client, userdata, msg):
                 .tag("asset_id", asset_id)
                 .tag("item_id", data.get("item_id", ""))
                 .tag("unit", data.get("unit", "units"))
-                .field("stock", data.get("stock", stock))
+                .field("stock", data.get("stock", 0))
                 .time(timestamp)
             )
             write_client.write(p)
@@ -170,7 +173,6 @@ def on_message(client, userdata, msg):
     # HANDLING DISPATCH COMMANDS (JSON → 3 BYTES)
     # ======================================================
     if topic == f"{GROUPID}/internal/tasks/dispatch":
-
         try:
             data = json.loads(payload_raw)
         except:
@@ -251,8 +253,6 @@ def udp_server():
             )
             write_client.write(p)
 
-
-
 # ========= MAIN =========
 if __name__ == "__main__":
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
@@ -268,4 +268,4 @@ if __name__ == "__main__":
 
     print("[GATEWAY] Running forever...")
     while True:
-        time.sleep(1)
+        time.sleep(0.1)

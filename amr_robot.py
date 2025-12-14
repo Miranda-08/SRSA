@@ -18,11 +18,11 @@ fh = open(certifi.where(), "r")
 cert = fh.read()
 fh.close()
 
+
 # ********************************************* CONFIG CONEXÕES *********************************************
 # ^ MQTT Broker Configuration
 BROKER = "10.6.1.9"
 PORT = 1883
-
 
 
 # ********************************************* FUNÇÕES CALLBACK *********************************************
@@ -86,7 +86,7 @@ def back_to_previous_task(current_task):
         return ("MOVING_TO_PICK", 4)
     elif current_task and current_task[2] is not None:
         print(f"Returned to state MOVING TO DROP.")
-        return ("MOVING_TO_DROP", 2)
+        return ("MOVING_TO_DROP_AGAIN", 2)
     else:
         print(f"Returned to state IDLE.")
         return "IDLE"
@@ -111,10 +111,6 @@ def publish_info(robot_id, GROUPID, state, battery, Sx, Px):
 DEBUG = True # <----------------------------------------------------------------------------------------------------------- DEBUG
 
 def amr_loop(robot_id, GROUPID):
-    # COISAS POR FAZER:
-    #   - existem charging stations limitadas? quantas? existe limitação no nº de robôs a serem charged?
-    #   - se tentar pegar em x items da shelf sendo que x>items disponiveis na shelf (NOTA: 2 ROBOS PODEM TENTAR TIRAR AO MESMO TEMPO) deve esperar até que items fique disponível
-
     global state, battery, commands, Sx, Px, remaining_time, next_tick, interval, current_task, forced_task, forced_task_index
 
     time.sleep(1) # Tempo para deixar MQTT conectar antes do loop
@@ -153,18 +149,17 @@ def amr_loop(robot_id, GROUPID):
 
 
         # ================= STALLED ==============================
-        # if state.startswith("MOVING") and random.random() < 0.05:
-        #     print(f"[AMR STATUS] Robot {robot_id} was moving but got STALLED for 10s...")
-        #     #(stalled como status temporário APENAS para debug da parte 1; em teoria, stalled continua até que haja um high-priority override command)
-        #     state = "STALLED"
+        if state.startswith("MOVING") and random.random() < 0.05:
+            print(f"[AMR STATUS] Robot {robot_id} was moving but got STALLED...")
+            state = "MOVING"
 
-        if state == "STALLED":
+        if state == "MOVING":
             publish_info(robot_id, GROUPID, state, battery, Sx, Px)
             tick_sleep()
             continue
 
         # ================= CARREGAMENTO =========================
-        if battery <= 20 and state not in ("MOVING_TO_CHARGE", "MOVING_TO_CHARGE_FORCED", "CHARGING"):
+        if battery <= 4 and state not in ("MOVING_TO_CHARGE", "MOVING_TO_CHARGE_FORCED", "CHARGING"):
             print(f"[AMR STATUS] Robot {robot_id} is almost out of battery. Will start MOVING TO CHARGE for 3s...")
             state = "MOVING_TO_CHARGE"
             remaining_time = 3
@@ -243,7 +238,7 @@ def amr_loop(robot_id, GROUPID):
             tick_sleep()
             continue
 
-        if state == "MOVING_TO_DROP":
+        if state == "MOVING_TO_DROP" or state == "MOVING_TO_DROP_AGAIN":
             battery = max(0, battery-1)
             if remaining_time == 0:
                 print(f"[AMR STATUS] Robot {robot_id} arrived at packing station P{Px}.")

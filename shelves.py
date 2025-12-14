@@ -30,21 +30,21 @@ database = "SRSA_PROJECT"
 write_client = InfluxDBClient3(host=host, token=token, database=database, org=org, flight_client_options=flight_client_options(tls_root_certs=cert))
 
 TOPIC_STOCK = f"{GROUPID}/internal/stock/update"
+ROBOT_STATUS = f"{GROUPID}/internal/amr/+/status"
 
 
 # ********************************************* FUNÇÕES CALLBACK *********************************************
 def on_connect(client, userdata, flags, rc, properties):
     global asset_id, zone_id, GROUPID
     if rc == 0:
-        print("[SHELF] Connected to MQTT broker")
-        client.subscribe(TOPIC_STOCK, 1)
-        print(f"[SHELF] Subscribed to topic: stock {TOPIC_STOCK}")
-        
-        # If this is a packing station, also subscribe to robot status updates
         if zone_id == "packing_zone":
-            robot_status_topic = f"{GROUPID}/internal/amr/+/status"
-            client.subscribe(robot_status_topic, 1)
-            print(f"[PACK STATION {asset_id}] Subscribed to robot status: {robot_status_topic}")
+            print("[PACK STATION] Connected to MQTT broker")
+            client.subscribe(ROBOT_STATUS, 1)
+            print(f"[PACK STATION {asset_id}] Subscribed to robot status: {ROBOT_STATUS}")
+        else:
+            print("[SHELF] Connected to MQTT broker")
+            client.subscribe(TOPIC_STOCK, 1)
+            print(f"[SHELF] Subscribed to topic: stock {TOPIC_STOCK}")
     else:
         print("[SHELF] Connection failed:", rc)
 
@@ -78,15 +78,13 @@ def on_message(client, userdata, msg):
                         # Robot is dropping - mark as BUSY
                         if status != "BUSY":
                             status = "BUSY"
-                            print(f"[PACK STATION {asset_id}] Status changed to BUSY (robot dropping)")
+                            print(f"[PACKING STATION {asset_id}] Status changed to BUSY (robot dropping)")
             elif status == "BUSY":
                         status = "AVAILABLE"
-                        print(f"[PACK STATION {asset_id}] Status changed to AVAILABLE (robot finished dropping, status: {robot_status})")
+                        print(f"[PACKING STATION {asset_id}] Status changed to AVAILABLE (robot finished dropping, status: {robot_status})")
 
-
-                
         except Exception as e:
-            print(f"[PACK STATION {asset_id}] Error processing robot status: {e}")
+            print(f"[PACKING STATION {asset_id}] Error processing robot status: {e}")
 
             
 # ********************************************* FUNÇÕES AUXILIARES *********************************************
@@ -119,7 +117,6 @@ def publish_info(asset_id, GROUPID, zone_id, item_id, stock, units):
 
 # ********************************************* CÓDIGO PRINCIPAL *********************************************
 def shelf_loop(GROUPID, zone_id, asset_id, update_time):
-    #   - falta alternar o estado realisticamente
 
     global refill_timer, refilling, stock, interval, next_tick
     time.sleep(1) # Tempo para deixar MQTT conectar antes do loop
@@ -149,7 +146,7 @@ def shelf_loop(GROUPID, zone_id, asset_id, update_time):
             # ================= MQTT PUBLISH =======================
             topic = f"warehouse/{GROUPID}/locations/{zone_id}/{asset_id}/status"
             client.publish(topic, json.dumps(payload))
-            print("[PACK STATION STATUS]", payload)
+            print("[PACKING STATION STATUS]", payload)
 
             tick_sleep()
     
@@ -176,7 +173,7 @@ def shelf_loop(GROUPID, zone_id, asset_id, update_time):
     while True:
         print(f"\n\n[SHELVES] NEW TURN\n")
 
-        if stock <= 1 and refilling == False:
+        if stock == 0 and refilling == False:
             print(f"[SHELF {asset_id}] Stock vazio! Vai iniciar refill automático, durante 2 segundos...")
             refill_timer = 2
             refilling = True

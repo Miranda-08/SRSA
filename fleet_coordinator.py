@@ -92,8 +92,7 @@ def handle_pick(robot_id):
         "quantity": quantity
     }
 
-    topic_stock = f"{GROUPID}/internal/stock/update"
-    client.publish(topic_stock, json.dumps(payload))
+    client.publish(TOPIC_STOCK, json.dumps(payload))
     print(f"[COORDINATOR] Decremented stock {quantity} from {shelf_id}")
 
 
@@ -277,7 +276,7 @@ def on_message(client, userdata, msg):
             print(f"[COORDINATOR] Updated robot {robot_id}: status={robot_status}")
             
             # 2. Add a check: only call handle_pick if status *just changed* to PICKING
-            if robot_status == "PICKING" and prev_status != "PICKING":
+            if robot_status == "MOVING_TO_DROP":
                 # If the robot is picking, decrement stock for the shelf it is at
                 handle_pick(robot_id)
             # ========================
@@ -319,4 +318,4 @@ if __name__ == "__main__":
     print("[COORDINATOR] - Listening to UDP port 9091 for new orders")
     print("[COORDINATOR] - Processing pending orders and dispatching tasks")
     while True:
-        time.sleep(1)
+        time.sleep(0.1)
