@@ -72,7 +72,7 @@ def tick_sleep():
 
 def get_location(state, shelf_id, station_id, charging_id = None):
     if state == "IDLE":                 return "DOCK"
-    elif state.startswith("MOVING"):    return "TRANSIT"
+    elif "MOVING" in state:    return "TRANSIT"
     elif state == "PICKING":            return f"SHELF-S{shelf_id}" if shelf_id is not None else "SHELF"
     elif state == "DROPPING":           return f"STATION-P{station_id}" if station_id is not None else "STATION"
     elif state == "CHARGING":           return "CHARGING_STATION"
@@ -108,7 +108,7 @@ def publish_info(robot_id, GROUPID, state, battery, Sx, Px):
 
 
 # ********************************************* CÓDIGO PRINCIPAL *********************************************
-DEBUG = True # <----------------------------------------------------------------------------------------------------------- DEBUG
+DEBUG = False # <----------------------------------------------------------------------------------------------------------- DEBUG
 
 def amr_loop(robot_id, GROUPID):
     global state, battery, commands, Sx, Px, remaining_time, next_tick, interval, current_task, forced_task, forced_task_index
@@ -149,7 +149,7 @@ def amr_loop(robot_id, GROUPID):
 
 
         # ================= STALLED ==============================
-        if state.startswith("MOVING") and random.random() < 0.05:
+        if "MOVING" in state and random.randint(1,100) == 1:
             print(f"[AMR STATUS] Robot {robot_id} was moving but got STALLED...")
             state = "MOVING"
 

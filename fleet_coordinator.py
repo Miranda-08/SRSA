@@ -71,18 +71,8 @@ def udp_server():
             print(f"[COORDINATOR]  Error in UDP server loop: {e}")
 
 # ********************************************* PICK HANDLER *********************************************
-def handle_pick(robot_id):
+def handle_pick(robot_id,shelf_id):
     """Robot is PICKING, decrement stock for that shelf"""
-    if robot_id not in world_state["robots"]:
-        return
-    
-    r = world_state["robots"][robot_id]
-    loc = r.get("location_id", "")  # e.g. SHELF-S3
-
-    if not loc.startswith("SHELF-S"):
-        return
-
-    shelf_id = loc.split("-")[1]  # S3
 
     # Example: remove 1 item per PICK
     quantity = 1
@@ -221,6 +211,7 @@ def assign_tasks():
 
 
 def on_message(client, userdata, msg):
+    global loc,shelf_id,r
     """
     Process incoming MQTT messages and update world_state.
     All world state information comes from MQTT messages published by the Gateway:
@@ -266,19 +257,22 @@ def on_message(client, userdata, msg):
     if "/internal/amr/" in topic:
         robot_id = data.get("robot_id")
         if robot_id:
-            
-            # 1. Retrieve the previous status *before* updating the world_state
+
             prev_status = world_state["robots"].get(robot_id, {}).get('status')
-            
             # Update robot state in world_state
             world_state["robots"][robot_id] = data
             robot_status = data.get('status')
             print(f"[COORDINATOR] Updated robot {robot_id}: status={robot_status}")
-            
-            # 2. Add a check: only call handle_pick if status *just changed* to PICKING
-            if robot_status == "MOVING_TO_DROP":
+            if robot_status == "PICKING":
+                    if robot_id not in world_state["robots"]:
+                        return
+                    r = world_state["robots"][robot_id]
+                    loc = r.get("location_id", "")  # e.g. SHELF-S3
+                    shelf_id = loc.split("-")[1]  # S3
+
+            elif "MOVING_TO_DROP" in robot_status and prev_status !="MOVING_TO_DROP":
                 # If the robot is picking, decrement stock for the shelf it is at
-                handle_pick(robot_id)
+                handle_pick(robot_id,shelf_id)
             # ========================
             
             # When robot status changes, try to assign pending tasks

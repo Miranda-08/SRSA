@@ -81,9 +81,9 @@ def process_robot_status(data):
 
     if previous_health != current_health:
         if current_health == "NORMAL":
-            print(f"[MONITOR] ✅ {robot_id} recovered → HEALTHY")
+            print(f"[MONITOR] {robot_id} recovered → HEALTHY")
         else:
-            print(f"[MONITOR] ❌ {robot_id} health → CRITICAL")
+            print(f"[MONITOR] {robot_id} health → CRITICAL")
 
 
 # ********************************************* MQTT CALLBACKS *********************************************
