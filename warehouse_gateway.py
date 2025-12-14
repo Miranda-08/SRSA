@@ -1,4 +1,4 @@
-import paho.mqtt.client as mqtt, json, time, socket, struct, threading, certifi
+import paho.mqtt.client as mqtt, json, time, socket, struct, threading, certifi, datetime
 from influxdb_client_3 import InfluxDBClient3, Point
 from influxdb_client_3 import flight_client_options
 import struct
@@ -39,10 +39,10 @@ fh = open(certifi.where(), "r")
 cert = fh.read()
 fh.close()
 
-token = "tCpqdhmLKj25M0W1Xt9F0_ok-nlk4hHPCPlDG6bjORsUdf23yWrpJgO9AidA6PZZfxn5G1JQ7i6u-b97s89sqQ=="
-org = "SRSA"
-host = "https://us-east-1-1.aws.cloud2.influxdata.com/"
-database = "SRSA_PROJECT"
+token = "5HLx9P10cJug12f-SEl4csVAmngvYmxSkm3qKqzXxxlJf7yFd7TU0niKFFs3VZBt_-OL117hIJQDcRMUZ1PN7w=="
+org = "DEIFCTUC"
+host = "https://eu-central-1-1.aws.cloud2.influxdata.com/"
+database = "PROJECT"
 write_client = InfluxDBClient3(host=host, token=token, database=database, org=org, flight_client_options=flight_client_options(tls_root_certs=cert))
 
 # ^ UDP Port
@@ -117,14 +117,56 @@ def on_message(client, userdata, msg):
         print(f"[GATEWAY] REPUBLISHED CLEAN → {internal_topic}: {data}")
 
         # ==================================================
-        # STORE IN INFLUXDB
+        # STORE IN INFLUXDB (separated by type)
         # ==================================================
-
-        p = (
-            Point("gateway_clean_data")
-            .field("json", normalized_json)
-        )
-        write_client.write(p)
+        
+        timestamp = datetime.datetime.now(datetime.timezone.utc)
+        
+        # SHELF - Store shelf data with tags and fields
+        if asset_type == "SHELF":
+            p = (
+                Point("shelf")
+                .tag("asset_id", asset_id)
+                .tag("item_id", data.get("item_id", ""))
+                .tag("unit", data.get("unit", "units"))
+                .field("stock", data.get("stock", 0))
+                .time(timestamp)
+            )
+            write_client.write(p)
+            print(f"[GATEWAY] InfluxDB: Shelf {asset_id} - stock={data.get('stock')}")
+        
+        # PACK_STATION - Store packing station data
+        elif asset_type == "PACK_STATION":
+            p = (
+                Point("packing_station")
+                .tag("asset_id", asset_id)
+                .field("status", data.get("status", ""))
+                .time(timestamp)
+            )
+            write_client.write(p)
+            print(f"[GATEWAY] InfluxDB: Packing Station {asset_id} - status={data.get('status')}")
+        
+        # ROBOT - Store robot data with all fields
+        else:
+            robot_id = data.get("robot_id", "")
+            p = (
+                Point("robot")
+                .tag("robot_id", robot_id)
+                .field("battery", data.get("battery", 0))
+                .field("status", data.get("status", ""))
+                .field("location_id", data.get("location_id", ""))
+                .time(timestamp)
+            )
+            if "timestamp" in data:
+                try:
+                    # Parse ISO timestamp if provided
+                    data_timestamp = datetime.datetime.fromisoformat(data["timestamp"].replace("Z", "+00:00"))
+                    p = p.time(data_timestamp)
+                except:
+                    pass
+            
+            write_client.write(p)
+            print(f"[GATEWAY] InfluxDB: Robot {robot_id} - battery={data.get('battery')}%, status={data.get('status')}, location={data.get('location_id')}")
 
         return
 
@@ -164,10 +206,11 @@ def on_message(client, userdata, msg):
         # Log command
         p = (
             Point("gateway_commands")
-            .field("command", cmd)
-            .field("robot_id", robot_id)
-            .field("shelf", shelf)
-            .field("station", station)
+            .tag("robot_id", robot_id)
+            .tag("command", cmd)
+            .field("shelf_id", shelf)
+            .field("station_id", station)
+            .time(datetime.datetime.now(datetime.timezone.utc))
         )
         write_client.write(p)
 
@@ -204,8 +247,11 @@ def udp_server():
             # Log override
             p = (
                 Point("gateway_alerts")
-                .field("robot_id", robot_id)
-                .field("override", "FORCE_CHARGE")
+                .tag("robot_id", robot_id)
+                .tag("level", msg.get("level", "CRITICAL"))
+                .field("override_task", "FORCE_CHARGE")
+                .field("reason", msg.get("reason", ""))
+                .time(datetime.datetime.now(datetime.timezone.utc))
             )
             write_client.write(p)
 
