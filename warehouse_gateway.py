@@ -90,11 +90,7 @@ def on_message(client, userdata, msg):
             stock = data.get("stock")
             unit = data.get("unit")
             # all SHELVES to "units"; 1 unit = 23 kg
-            if unit == "kg":
-                if isinstance(stock, (int, float)):
-                    stock_units = int(stock / UNIT_KG_FACTOR)
-                    data["stock"] = stock_units
-                    data["unit"] = "units"
+                
             asset_id = data["asset_id"]
             internal_topic = f"{GROUPID}/internal/static/{asset_id}/status"
 
@@ -129,7 +125,7 @@ def on_message(client, userdata, msg):
                 .tag("asset_id", asset_id)
                 .tag("item_id", data.get("item_id", ""))
                 .tag("unit", data.get("unit", "units"))
-                .field("stock", data.get("stock", 0))
+                .field("stock", data.get("stock", stock))
                 .time(timestamp)
             )
             write_client.write(p)

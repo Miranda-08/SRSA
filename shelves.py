@@ -176,7 +176,7 @@ def shelf_loop(GROUPID, zone_id, asset_id, update_time):
     while True:
         print(f"\n\n[SHELVES] NEW TURN\n")
 
-        if stock == 0 and refilling == False:
+        if stock <= 1 and refilling == False:
             print(f"[SHELF {asset_id}] Stock vazio! Vai iniciar refill automático, durante 2 segundos...")
             refill_timer = 2
             refilling = True

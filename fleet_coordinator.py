@@ -70,65 +70,6 @@ def udp_server():
         except Exception as e:
             print(f"[COORDINATOR]  Error in UDP server loop: {e}")
 
-
-
-def on_message(client, userdata, msg):
-    """
-    Process incoming MQTT messages and update world_state.
-    All world state information comes from MQTT messages published by the Gateway:
-    - Robot status from {GROUPID}/internal/amr/{robot_id}/status
-    - Shelf and packing station status from {GROUPID}/internal/static/{asset_id}/status
-    """
-    topic = msg.topic
-    payload = msg.payload.decode(errors="replace")
-    
-    try:
-        data = json.loads(payload)
-    except json.JSONDecodeError:
-        print(f"[COORDINATOR] Invalid JSON in topic {topic}")
-        return
-    
-    # ===================================================
-    # STATIC STATUS (shelves + packing stations)
-    # ===================================================
-    if "/internal/static/" in topic:
-        asset_type = data.get("type", "")
-        
-        if asset_type == "PACK_STATION":
-            asset_id = data["asset_id"]
-            world_state["packing_stations"][asset_id] = data["status"]
-            print(f"[COORDINATOR] Updated packing station {asset_id}: {data['status']}")
-        
-        elif asset_type == "SHELF":
-            asset_id = data["asset_id"]
-            # Store full shelf data including item_id for matching
-            world_state["shelves"][asset_id] = {
-                "asset_id": asset_id,
-                "item_id": data.get("item_id"),
-                "stock": data.get("stock", 0),
-                "unit": data.get("unit", "units")
-            }
-            print(f"[COORDINATOR] Updated shelf {asset_id}: item={data.get('item_id')}, stock={data.get('stock')}")
-        
-        return
-
-    # ===================================================
-    # AMR STATUS (robot updates)
-    # ===================================================
-    if "/internal/amr/" in topic:
-        robot_id = data.get("robot_id")
-        if robot_id:
-            # Update robot state in world_state
-            world_state["robots"][robot_id] = data
-            print(f"[COORDINATOR] Updated robot {robot_id}: status={data.get('status')}")
-            
-            # When robot status changes, try to assign pending tasks
-            assign_tasks()
-        
-        return
-
-
-
 # ********************************************* PICK HANDLER *********************************************
 def handle_pick(robot_id):
     """Robot is PICKING, decrement stock for that shelf"""
@@ -167,7 +108,7 @@ def assign_tasks():
     for i, order in enumerate(pending_orders):
         # Order format: {"item": "item_A", "quantity": 10, "pack_station": "P1"}
         required_item = order.get("item")
-        required_quantity = order.get("quantity", 0)
+        required_quantity = order.get("quantity")
         pack_station = order.get("pack_station")
         
         if not required_item or not pack_station:
@@ -278,6 +219,74 @@ def assign_tasks():
         
         # Only process one order per call to avoid race conditions
         return
+
+
+def on_message(client, userdata, msg):
+    """
+    Process incoming MQTT messages and update world_state.
+    All world state information comes from MQTT messages published by the Gateway:
+    - Robot status from {GROUPID}/internal/amr/{robot_id}/status
+    - Shelf and packing station status from {GROUPID}/internal/static/{asset_id}/status
+    """
+    topic = msg.topic
+    payload = msg.payload.decode(errors="replace")
+    
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        print(f"[COORDINATOR] Invalid JSON in topic {topic}")
+        return
+    
+    # ===================================================
+    # STATIC STATUS (shelves + packing stations)
+    # ===================================================
+    if "/internal/static/" in topic:
+        asset_type = data.get("type", "")
+        
+        if asset_type == "PACK_STATION":
+            asset_id = data["asset_id"]
+            world_state["packing_stations"][asset_id] = data["status"]
+            print(f"[COORDINATOR] Updated packing station {asset_id}: {data['status']}")
+        
+        elif asset_type == "SHELF":
+            asset_id = data["asset_id"]
+            # Store full shelf data including item_id for matching
+            world_state["shelves"][asset_id] = {
+                "asset_id": asset_id,
+                "item_id": data.get("item_id"),
+                "stock": data.get("stock", 0),
+                "unit": data.get("unit", "units")
+            }
+            print(f"[COORDINATOR] Updated shelf {asset_id}: item={data.get('item_id')}, stock={data.get('stock')}")
+        
+        return
+
+    # ===================================================
+    # AMR STATUS (robot updates)
+    # ===================================================
+    if "/internal/amr/" in topic:
+        robot_id = data.get("robot_id")
+        if robot_id:
+            
+            # 1. Retrieve the previous status *before* updating the world_state
+            prev_status = world_state["robots"].get(robot_id, {}).get('status')
+            
+            # Update robot state in world_state
+            world_state["robots"][robot_id] = data
+            robot_status = data.get('status')
+            print(f"[COORDINATOR] Updated robot {robot_id}: status={robot_status}")
+            
+            # 2. Add a check: only call handle_pick if status *just changed* to PICKING
+            if robot_status == "PICKING" and prev_status != "PICKING":
+                # If the robot is picking, decrement stock for the shelf it is at
+                handle_pick(robot_id)
+            # ========================
+            
+            # When robot status changes, try to assign pending tasks
+            assign_tasks()
+        return
+
+
 
 
 # ********************************************* MAIN *********************************************
